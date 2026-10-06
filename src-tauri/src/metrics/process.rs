@@ -9,6 +9,7 @@ use super::types::{ProcessEntry, ProcessMetrics};
 pub struct ProcessCollector {
     system: System,
     last_refresh: Instant,
+    logical_cpus: f32,
 }
 
 impl ProcessCollector {
@@ -23,6 +24,7 @@ impl ProcessCollector {
         Self {
             system,
             last_refresh: Instant::now() - Duration::from_secs(2),
+            logical_cpus: logical_cpu_count(),
         }
     }
 
@@ -56,8 +58,9 @@ impl ProcessCollector {
                     pid: pid.as_u32(),
                     name,
                     cmd: truncate_cmd(&cmd, 120),
-                    cpu_percent: process.cpu_usage(),
-                    memory_bytes: process.memory() * 1024,
+                    cpu_percent: machine_cpu_percent(process.cpu_usage(), self.logical_cpus),
+                    // sysinfo 0.33 reports resident memory in bytes.
+                    memory_bytes: process.memory(),
                     status: format!("{:?}", process.status()),
                     is_ai,
                 }
@@ -88,7 +91,7 @@ impl ProcessCollector {
         let top_cpu_pids: HashSet<u32> = top_cpu.iter().map(|p| p.pid).collect();
         let mut background: Vec<ProcessEntry> = entries
             .into_iter()
-            .filter(|p| p.cpu_percent < 0.5 && !top_cpu_pids.contains(&p.pid))
+            .filter(|p| p.cpu_percent < 0.5 / self.logical_cpus && !top_cpu_pids.contains(&p.pid))
             .collect();
         background.sort_by_key(|entry| Reverse(entry.memory_bytes));
         background.truncate(limit);
@@ -102,11 +105,40 @@ impl ProcessCollector {
     }
 }
 
+fn logical_cpu_count() -> f32 {
+    std::thread::available_parallelism()
+        .map(|count| count.get().max(1) as f32)
+        .unwrap_or(1.0)
+}
+
+/// sysinfo reports process CPU as a sum across cores, so one thread at full
+/// speed is 100 and a 16-thread process can exceed 1000. The rest of the UI
+/// uses 0–100 for the whole machine.
+fn machine_cpu_percent(raw_cpu: f32, logical_cpus: f32) -> f32 {
+    if !raw_cpu.is_finite() || logical_cpus <= 0.0 {
+        return 0.0;
+    }
+    (raw_cpu / logical_cpus).clamp(0.0, 100.0)
+}
+
 fn is_ai_process(name: &str, cmd: &str, patterns: &[String]) -> bool {
     let haystack = format!("{} {}", name.to_lowercase(), cmd.to_lowercase());
     patterns
         .iter()
         .any(|pattern| haystack.contains(&pattern.to_lowercase()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::machine_cpu_percent;
+
+    #[test]
+    fn normalizes_multicore_cpu_to_the_whole_machine() {
+        assert!((machine_cpu_percent(801.0, 16.0) - 50.0625).abs() < 0.001);
+        assert_eq!(machine_cpu_percent(1600.0, 16.0), 100.0);
+        assert_eq!(machine_cpu_percent(50.0, 1.0), 50.0);
+        assert_eq!(machine_cpu_percent(f32::NAN, 16.0), 0.0);
+    }
 }
 
 fn truncate_cmd(cmd: &str, max: usize) -> String {
