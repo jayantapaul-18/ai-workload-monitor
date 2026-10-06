@@ -9,7 +9,13 @@ Tauri 2 collects metrics in Rust. React renders the dashboard.
 
 By [Jayanta Paul](https://github.com/jayantapaul-18).
 
+## Screenshots
+
 ![Performance Overview](docs/performance-overview.png)
+
+![CPU cores](docs/cpu-cores.png)
+
+![Processes and active AI workloads](docs/processes.png)
 
 ## Features
 
