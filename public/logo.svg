@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="128" y2="128">
+      <stop offset="0%" stop-color="#111820"/>
+      <stop offset="100%" stop-color="#0a0e14"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="24" y1="24" x2="104" y2="104">
+      <stop offset="0%" stop-color="#3dd68c"/>
+      <stop offset="100%" stop-color="#45caff"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <rect x="24" y="28" width="80" height="56" rx="10" stroke="url(#accent)" stroke-width="3"/>
+  <rect x="34" y="40" width="14" height="14" rx="3" fill="#3dd68c" opacity="0.9"/>
+  <rect x="52" y="40" width="14" height="14" rx="3" fill="#3dd68c" opacity="0.55"/>
+  <rect x="70" y="40" width="14" height="14" rx="3" fill="#45caff" opacity="0.75"/>
+  <rect x="88" y="40" width="14" height="14" rx="3" fill="#a78bfa" opacity="0.8"/>
+  <path d="M34 68 H94" stroke="#45caff" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+  <path d="M34 74 C50 82, 78 62, 94 74" stroke="#3dd68c" stroke-width="2.5" stroke-linecap="round"/>
+  <polygon points="88,92 98,92 93,82" fill="#a78bfa"/>
+</svg>

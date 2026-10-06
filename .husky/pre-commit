@@ -1,0 +1,21 @@
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR || true)
+for file in $staged; do
+  case "$file" in
+    .env|.env.*|*/.env|*/.env.*)
+      echo "Refusing to commit env file: $file" >&2
+      exit 1
+      ;;
+    src-tauri/target/*|node_modules/*|dist/*)
+      echo "Refusing to commit generated path: $file" >&2
+      exit 1
+      ;;
+  esac
+done
+
+npm run typecheck
+cargo fmt --manifest-path src-tauri/Cargo.toml --check

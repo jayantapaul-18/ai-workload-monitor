@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AI Workload Monitor",
+  "version": "0.1.0",
+  "identifier": "com.aiops.ai-workload-monitor",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "AI Workload Monitor",
+        "label": "main",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "center": true,
+        "decorations": true,
+        "resizable": true
+      },
+      {
+        "title": "PulseMonitor",
+        "label": "tray-popup",
+        "url": "index.html?view=tray",
+        "width": 380,
+        "height": 480,
+        "center": false,
+        "decorations": false,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": false,
+        "skipTaskbar": true,
+        "focus": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "shortDescription": "Monitor CPU, GPU, NPU, memory, network and AI processes",
+    "longDescription": "High-performance local system monitor tuned for AI workloads on Ubuntu."
+  }
+}

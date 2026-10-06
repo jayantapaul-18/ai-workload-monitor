@@ -1,0 +1,152 @@
+.tray-popup {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.tray-popup__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tray-popup__header strong {
+  display: block;
+  font-size: 14px;
+}
+
+.tray-popup__live {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.tray-popup__live--on {
+  color: var(--accent);
+}
+
+.tray-popup__bars {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tray-bar__head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+
+.tray-bar__head strong {
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--text);
+}
+
+.tray-bar__track {
+  height: 6px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.tray-bar__fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+.tray-popup__models {
+  padding: 0 16px 12px;
+  flex: 1;
+}
+
+.tray-popup__models h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.tray-model-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tray-model-row:last-child {
+  border-bottom: none;
+}
+
+.tray-model-row__name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tray-model-row__meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tray-model-row__tps {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.tray-popup__empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+.tray-popup__hint {
+  margin: 0 16px 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--warning-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.tray-popup__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.tray-popup__actions button {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tray-popup__actions button:hover {
+  background: var(--bg-hover);
+}
+
+.tray-popup__quit {
+  color: var(--danger);
+}
