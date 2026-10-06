@@ -16,6 +16,9 @@ dist-ssr
 src-tauri/target
 src-tauri/gen/schemas
 
+# Local launcher with a machine-specific Exec path
+ai-workload-monitor.desktop
+
 # Secrets and local env
 .env
 .env.*

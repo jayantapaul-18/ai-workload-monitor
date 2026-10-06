@@ -95,7 +95,7 @@ fn collect_hardware_profile() -> HardwareProfile {
         app: AppSpec {
             name: "AI Workload Monitor".into(),
             version: env!("CARGO_PKG_VERSION").into(),
-            identifier: "com.aiops.ai-workload-monitor".into(),
+            identifier: "com.jayantapaul.ai-workload-monitor".into(),
         },
     }
 }

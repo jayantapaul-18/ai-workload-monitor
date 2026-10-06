@@ -7,6 +7,10 @@ Tauri 2 collects metrics in Rust. React renders the dashboard.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platform: Linux](https://img.shields.io/badge/platform-Linux-orange.svg)
 
+By [Jayanta Paul](https://github.com/jayantapaul-18).
+
+![Performance Overview](docs/performance-overview.png)
+
 ## Features
 
 - Per-core CPU, AMD GPU, and AMD XDNA NPU panels

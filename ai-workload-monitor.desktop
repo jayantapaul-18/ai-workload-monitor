@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=AI Workload Monitor
-Comment=Monitor CPU, GPU, NPU, memory, network and AI processes
-Exec=/home/aiops/ai-projects/ai-workload-monitor/src-tauri/target/release/ai-workload-monitor
-Icon=/home/aiops/ai-projects/ai-workload-monitor/src-tauri/icons/128x128.png
-Terminal=false
-Categories=System;Monitor;
-StartupNotify=true

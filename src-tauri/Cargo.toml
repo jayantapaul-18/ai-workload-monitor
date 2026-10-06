@@ -2,8 +2,9 @@
 name = "ai-workload-monitor"
 version = "0.1.0"
 description = "Local Linux system monitor for AI workloads"
-authors = ["aiops"]
+authors = ["Jayanta Paul"]
 license = "MIT"
+repository = "https://github.com/jayantapaul-18/ai-workload-monitor"
 readme = "../README.md"
 keywords = ["system-monitor", "gpu", "ollama", "tauri"]
 categories = ["gui"]

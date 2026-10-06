@@ -3,8 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "description": "Local Linux system monitor for AI workloads",
-  "author": "aiops",
+  "author": "Jayanta Paul (https://github.com/jayantapaul-18)",
   "license": "MIT",
+  "homepage": "https://github.com/jayantapaul-18/ai-workload-monitor",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jayantapaul-18/ai-workload-monitor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jayantapaul-18/ai-workload-monitor/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=20.19"
