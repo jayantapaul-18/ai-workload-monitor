@@ -3,8 +3,6 @@ use std::collections::HashMap;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use sysinfo::{ProcessesToUpdate, System};
-
 use super::types::{
     AiRuntimeMetrics, AiWorkloadEntry, BottleneckInsight, CpuMetrics, GpuMetrics, MemoryMetrics,
 };
@@ -18,6 +16,7 @@ pub struct AiRuntimeCollector {
 }
 
 impl AiRuntimeCollector {
+    #[allow(clippy::too_many_arguments)]
     pub fn collect(
         &mut self,
         enabled: bool,
@@ -26,6 +25,7 @@ impl AiRuntimeCollector {
         gpu: &GpuMetrics,
         cpu: &CpuMetrics,
         memory: &MemoryMetrics,
+        runner_cpu: f32,
     ) -> AiRuntimeMetrics {
         if !enabled {
             return AiRuntimeMetrics::default();
@@ -34,7 +34,9 @@ impl AiRuntimeCollector {
         let mut workloads = Vec::new();
         let mut runtimes_online = Vec::new();
 
-        if let Some(ollama) = collect_ollama(ollama_url, gpu, &mut self.ollama_tps_smooth) {
+        if let Some(ollama) =
+            collect_ollama(ollama_url, gpu, &mut self.ollama_tps_smooth, runner_cpu)
+        {
             runtimes_online.push("ollama".into());
             workloads.extend(ollama);
         }
@@ -91,6 +93,7 @@ fn collect_ollama(
     base_url: &str,
     gpu: &GpuMetrics,
     tps_smooth: &mut HashMap<String, f32>,
+    runner_cpu: f32,
 ) -> Option<Vec<AiWorkloadEntry>> {
     let url = format!("{}/api/ps", base_url.trim_end_matches('/'));
     let response = ureq::get(&url).timeout(HTTP_TIMEOUT).call().ok()?;
@@ -100,7 +103,6 @@ fn collect_ollama(
         .and_then(|text| serde_json::from_str(&text).ok())?;
 
     let cli_rows = parse_ollama_ps_cli(base_url);
-    let runner_cpu = detect_ollama_runner_cpu();
 
     if body.models.is_empty() && cli_rows.is_empty() {
         return Some(Vec::new());
@@ -244,26 +246,6 @@ fn ollama_host_from_url(base_url: &str) -> String {
         .trim_start_matches("https://")
         .trim_end_matches('/')
         .to_string()
-}
-
-fn detect_ollama_runner_cpu() -> f32 {
-    let mut system = System::new();
-    system.refresh_processes(ProcessesToUpdate::All, true);
-
-    let mut max_cpu = 0.0f32;
-    for process in system.processes().values() {
-        let name = process.name().to_string_lossy().to_lowercase();
-        let cmd = process
-            .cmd()
-            .iter()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if name.contains("ollama") && (cmd.contains("runner") || cmd.contains("run ")) {
-            max_cpu = max_cpu.max(process.cpu_usage());
-        }
-    }
-    max_cpu
 }
 
 fn resolve_ollama_throughput(

@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { listen } from "@tauri-apps/api/event";
 import { useMetrics } from "./hooks/useMetrics";
 import { applyTheme } from "./hooks/useSettings";
 import type { AppSettings } from "./types/settings";
@@ -39,11 +38,8 @@ export function TrayPopupApp() {
       }
     });
 
-    const unlistenMetrics = listen("metrics-update", () => {});
-
     return () => {
       unlistenBlur.then((fn) => fn());
-      unlistenMetrics.then((fn) => fn());
     };
   }, []);
 
@@ -54,7 +50,7 @@ export function TrayPopupApp() {
     <div className="tray-popup">
       <header className="tray-popup__header">
         <div>
-          <strong>PulseMonitor</strong>
+          <strong>AI Workload Monitor</strong>
           <span className={`tray-popup__live ${connected ? "tray-popup__live--on" : ""}`}>
             {connected ? "Live" : "Connecting…"}
           </span>

@@ -18,9 +18,9 @@ import "./App.css";
 
 function App() {
   const [tab, setTab] = useState<TabId>("overview");
-  const { metrics, connected, history, gpuHistory, memHistory, rxHistory, txHistory } =
-    useMetrics();
   const { settings, settingsPath, saving, update, reset } = useSettings();
+  const { metrics, connected, history, gpuHistory, memHistory, rxHistory, txHistory } =
+    useMetrics(settings.historyLength);
   const { profile, loading: hardwareLoading, error: hardwareError } = useHardware();
   const data = metrics ?? EMPTY_METRICS;
 

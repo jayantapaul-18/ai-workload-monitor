@@ -2,9 +2,17 @@ use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 use super::types::{ProcessEntry, ProcessMetrics};
+
+fn process_refresh_kind() -> ProcessRefreshKind {
+    ProcessRefreshKind::nothing()
+        .with_cpu()
+        .with_memory()
+        .with_cmd(UpdateKind::OnlyIfNotSet)
+        .with_exe(UpdateKind::OnlyIfNotSet)
+}
 
 pub struct ProcessCollector {
     system: System,
@@ -15,17 +23,30 @@ pub struct ProcessCollector {
 impl ProcessCollector {
     pub fn new() -> Self {
         let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::everything(),
-        );
+        system.refresh_processes_specifics(ProcessesToUpdate::All, true, process_refresh_kind());
 
         Self {
             system,
             last_refresh: Instant::now() - Duration::from_secs(2),
             logical_cpus: logical_cpu_count(),
         }
+    }
+
+    pub fn ollama_runner_cpu(&self) -> f32 {
+        let mut max_cpu = 0.0f32;
+        for process in self.system.processes().values() {
+            let name = process.name().to_string_lossy().to_lowercase();
+            let cmd = process
+                .cmd()
+                .iter()
+                .map(|s| s.to_string_lossy().to_lowercase())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if name.contains("ollama") && (cmd.contains("runner") || cmd.contains("run ")) {
+                max_cpu = max_cpu.max(process.cpu_usage());
+            }
+        }
+        max_cpu
     }
 
     pub fn collect(&mut self, ai_keywords: &[String], limit: u32) -> ProcessMetrics {
@@ -35,7 +56,7 @@ impl ProcessCollector {
             self.system.refresh_processes_specifics(
                 ProcessesToUpdate::All,
                 true,
-                ProcessRefreshKind::everything(),
+                process_refresh_kind(),
             );
             self.last_refresh = Instant::now();
         }

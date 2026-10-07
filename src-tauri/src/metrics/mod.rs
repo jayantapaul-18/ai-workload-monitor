@@ -75,6 +75,10 @@ impl MetricsEngine {
         let cpu = self.cpu.collect();
         let memory = self.memory.collect();
         let gpu = self.gpu.collect();
+        let processes = self
+            .process
+            .collect(&options.ai_keywords, options.process_limit);
+        let runner_cpu = self.process.ollama_runner_cpu();
         let ai_runtimes = self.ai_runtimes.collect(
             options.ai_intelligence_enabled,
             &options.ollama_url,
@@ -82,6 +86,7 @@ impl MetricsEngine {
             &gpu,
             &cpu,
             &memory,
+            runner_cpu,
         );
 
         MetricsSnapshot {
@@ -90,9 +95,7 @@ impl MetricsEngine {
             memory,
             gpu,
             npu: self.npu.collect(),
-            processes: self
-                .process
-                .collect(&options.ai_keywords, options.process_limit),
+            processes,
             network: self.network.collect(),
             system,
             ai_runtimes,

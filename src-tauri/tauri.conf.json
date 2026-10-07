@@ -23,7 +23,7 @@
         "resizable": true
       },
       {
-        "title": "PulseMonitor",
+        "title": "AI Workload Monitor",
         "label": "tray-popup",
         "url": "index.html?view=tray",
         "width": 380,

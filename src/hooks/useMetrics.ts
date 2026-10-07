@@ -3,9 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { EMPTY_METRICS, type MetricsSnapshot } from "../types/metrics";
 
-const HISTORY_LEN = 60;
-
-export function useMetrics() {
+export function useMetrics(historyLength: number = 60) {
   const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
   const [connected, setConnected] = useState(false);
   const [history, setHistory] = useState<number[]>([]);
@@ -14,16 +12,24 @@ export function useMetrics() {
   const [rxHistory, setRxHistory] = useState<number[]>([]);
   const [txHistory, setTxHistory] = useState<number[]>([]);
 
+  useEffect(() => {
+    setHistory((prev) => prev.slice(-historyLength));
+    setGpuHistory((prev) => prev.slice(-historyLength));
+    setMemHistory((prev) => prev.slice(-historyLength));
+    setRxHistory((prev) => prev.slice(-historyLength));
+    setTxHistory((prev) => prev.slice(-historyLength));
+  }, [historyLength]);
+
   const pushHistory = useCallback((snap: MetricsSnapshot) => {
     const push = (setter: (fn: (prev: number[]) => number[]) => void, val: number) => {
-      setter((prev) => [...prev, val].slice(-HISTORY_LEN));
+      setter((prev) => [...prev, val].slice(-historyLength));
     };
     push(setHistory, snap.cpu.overall_usage);
     push(setGpuHistory, snap.gpu.usage_percent);
     push(setMemHistory, snap.memory.usage_percent);
     push(setRxHistory, snap.network.total_rx_bytes_per_sec);
     push(setTxHistory, snap.network.total_tx_bytes_per_sec);
-  }, []);
+  }, [historyLength]);
 
   useEffect(() => {
     let cancelled = false;

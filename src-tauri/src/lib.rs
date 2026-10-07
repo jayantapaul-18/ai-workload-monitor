@@ -101,7 +101,11 @@ fn quit_app(app: tauri::AppHandle) {
 
 #[tauri::command]
 fn test_notification(app: tauri::AppHandle) -> Result<(), String> {
-    send_desktop_notification(&app, "PulseMonitor", "Desktop notifications are working.")
+    send_desktop_notification(
+        &app,
+        "AI Workload Monitor",
+        "Desktop notifications are working.",
+    )
 }
 
 #[tauri::command]
@@ -455,12 +459,12 @@ pub fn run() {
                     let _ = window.hide();
                     if let Some(tray) = app.tray_by_id("main") {
                         let _ = tray.set_tooltip(Some(
-                            "PulseMonitor — running in tray. Click icon for popup, or right-click → Show Dashboard.",
+                            "AI Workload Monitor — running in tray. Click icon for popup, or right-click → Show Dashboard.",
                         ));
                     }
                     let _ = send_desktop_notification(
                         app.handle(),
-                        "PulseMonitor",
+                        "AI Workload Monitor",
                         "Running in the system tray. Click the tray icon to open.",
                     );
                 } else {
