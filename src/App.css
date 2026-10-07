@@ -1912,6 +1912,16 @@ body {
   color: var(--accent);
 }
 
+.about-features__shipped li {
+  color: var(--text);
+}
+
+.about-features__shipped li::before {
+  content: "✓";
+  color: #34d399;
+  font-weight: 700;
+}
+
 .alert-log {
   margin-top: 20px;
   padding: 14px;

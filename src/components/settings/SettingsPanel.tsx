@@ -368,21 +368,29 @@ export function SettingsPanel({
         {section === "about" && (
           <SettingSection title="About" description="AI Workload Monitor">
             <div className="about-grid">
-              <div><span>Version</span><strong>0.1.0</strong></div>
-              <div><span>Stack</span><strong>Tauri 2 + Rust + React</strong></div>
+              <div><span>Version</span><strong>0.2.0</strong></div>
+              <div><span>Stack</span><strong>Tauri 2 + Rust + React 19</strong></div>
               <div><span>License</span><strong>MIT (open source)</strong></div>
-              <div><span>Settings file</span><code>{settingsPath || "~/.config/ai-workload-monitor/settings.json"}</code></div>
+              <div><span>Settings file</span><code>{settingsPath || "~/.config/pulse-monitor/settings.json"}</code></div>
             </div>
             <div className="about-features">
               <h4>Feature tracker</h4>
               <p className="about-features__intro">
                 Full list of shipped and planned features:{" "}
-                <code>docs/FEATURES.md</code> in the project repo.
+                <code>docs/FEATURES.md</code> and <code>CHANGELOG.md</code>.
               </p>
+              <h4>Recently shipped (v0.2.0)</h4>
+              <ul className="about-features__shipped">
+                <li>Compact tray popup with live mini-charts</li>
+                <li>ComfyUI queue & system stats connector</li>
+                <li>llama.cpp (llama-server) slots & props connector</li>
+                <li>Decoupled asynchronous AI background scraper</li>
+                <li>NVIDIA GPU telemetry via nvidia-smi</li>
+                <li>Interactive System Architecture & Data Flow page</li>
+                <li>Live process search filter & sortable columns</li>
+              </ul>
               <h4>Next up (planned)</h4>
               <ul>
-                <li>Compact tray popup with live mini-charts</li>
-                <li>ComfyUI queue connector</li>
                 <li>NPU utilization via XRT/amdxdna</li>
                 <li>Historical CSV logging for training runs</li>
                 <li>Per-GPU process VRAM attribution</li>

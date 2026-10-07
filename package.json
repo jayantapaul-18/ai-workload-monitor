@@ -1,7 +1,7 @@
 {
   "name": "ai-workload-monitor",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local Linux system monitor for AI workloads",
   "author": "Jayanta Paul (https://github.com/jayantapaul-18)",
   "license": "MIT",
