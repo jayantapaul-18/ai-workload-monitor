@@ -217,22 +217,59 @@ fn read_gpu_spec() -> GpuSpec {
             let is_amd = uevent
                 .as_deref()
                 .is_some_and(|u| u.contains("DRIVER=amdgpu"));
+            let is_nvidia = uevent
+                .as_deref()
+                .is_some_and(|u| u.contains("DRIVER=nvidia"));
             let vendor = read_path(&device.join("vendor"));
-            if !is_amd && vendor.as_deref() != Some("0x1002") {
+            let is_amd_vendor =
+                vendor.as_deref() == Some("0x1002") || vendor.as_deref() == Some("0x1022");
+            let is_nvidia_vendor = vendor.as_deref() == Some("0x10de");
+
+            if !is_amd && !is_nvidia && !is_amd_vendor && !is_nvidia_vendor {
                 continue;
             }
 
             spec.detected = true;
-            spec.name = read_path(&device.join("product_name"))
-                .or_else(|| read_path(&device.join("product_number")))
-                .unwrap_or_else(|| "AMD GPU".into());
-            spec.driver = uevent
-                .as_deref()
-                .and_then(|u| {
-                    u.lines()
-                        .find_map(|l| l.strip_prefix("DRIVER=").map(str::to_string))
-                })
-                .unwrap_or_else(|| "amdgpu".into());
+            if is_nvidia || is_nvidia_vendor {
+                spec.name = read_path(&device.join("product_name"))
+                    .or_else(|| read_path(&device.join("product_number")))
+                    .unwrap_or_else(|| "NVIDIA GPU".into());
+                spec.driver = "nvidia".into();
+
+                if let Ok(output) = std::process::Command::new("nvidia-smi")
+                    .args([
+                        "--query-gpu=name,memory.total",
+                        "--format=csv,noheader,nounits",
+                    ])
+                    .output()
+                {
+                    if let Some(line) = String::from_utf8_lossy(&output.stdout).lines().next() {
+                        let parts: Vec<&str> = line.split(',').map(str::trim).collect();
+                        if let Some(n) = parts.first() {
+                            if !n.is_empty() {
+                                spec.name = n.to_string();
+                            }
+                        }
+                        if let Some(vram_mb) = parts.get(1).and_then(|m| m.parse::<u64>().ok()) {
+                            spec.vram_bytes = Some(vram_mb * 1024 * 1024);
+                        }
+                    }
+                }
+            } else {
+                spec.name = read_path(&device.join("product_name"))
+                    .or_else(|| read_path(&device.join("product_number")))
+                    .unwrap_or_else(|| "AMD GPU".into());
+                spec.driver = uevent
+                    .as_deref()
+                    .and_then(|u| {
+                        u.lines()
+                            .find_map(|l| l.strip_prefix("DRIVER=").map(str::to_string))
+                    })
+                    .unwrap_or_else(|| "amdgpu".into());
+                spec.vram_bytes =
+                    read_path(&device.join("mem_info_vram_total")).and_then(|s| s.parse().ok());
+            }
+
             spec.pci_address = uevent
                 .as_deref()
                 .and_then(|u| {
@@ -240,8 +277,6 @@ fn read_gpu_spec() -> GpuSpec {
                         .find_map(|l| l.strip_prefix("PCI_SLOT_NAME=").map(str::to_string))
                 })
                 .unwrap_or_default();
-            spec.vram_bytes =
-                read_path(&device.join("mem_info_vram_total")).and_then(|s| s.parse().ok());
             break;
         }
     }

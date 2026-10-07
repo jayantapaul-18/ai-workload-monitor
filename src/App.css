@@ -982,6 +982,69 @@ body {
   font-weight: 600;
 }
 
+.process-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.process-toolbar .sub-tabs {
+  margin-bottom: 0;
+}
+
+.process-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.process-search__input {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 32px 8px 12px;
+  width: 250px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.process-search__input:focus {
+  border-color: var(--accent);
+}
+
+.process-search__clear {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+}
+
+.process-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.process-table th.sortable:hover {
+  color: var(--text);
+}
+
+.sort-arrow {
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--accent);
+}
+
 .process-table {
   width: 100%;
   border-collapse: collapse;

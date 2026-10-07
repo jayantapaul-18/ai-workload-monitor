@@ -11,6 +11,8 @@ pub struct NetworkCollector {
     prev_sample: Instant,
     wifi_cache: Option<WifiMetrics>,
     wifi_last_fetch: Instant,
+    ip_cache: HashMap<String, Vec<String>>,
+    ip_last_fetch: Instant,
 }
 
 impl NetworkCollector {
@@ -20,6 +22,8 @@ impl NetworkCollector {
             prev_sample: Instant::now(),
             wifi_cache: None,
             wifi_last_fetch: Instant::now() - std::time::Duration::from_secs(30),
+            ip_cache: HashMap::new(),
+            ip_last_fetch: Instant::now() - std::time::Duration::from_secs(30),
         }
     }
 
@@ -29,6 +33,11 @@ impl NetworkCollector {
         let mut interfaces = Vec::new();
         let mut total_rx = 0u64;
         let mut total_tx = 0u64;
+
+        if self.ip_last_fetch.elapsed().as_secs() >= 15 || self.ip_cache.is_empty() {
+            self.ip_cache = read_all_ipv4();
+            self.ip_last_fetch = Instant::now();
+        }
 
         for (name, (rx, tx)) in &current {
             if name == "lo" {
@@ -41,7 +50,8 @@ impl NetworkCollector {
             total_rx += rx_rate;
             total_tx += tx_rate;
 
-            interfaces.push(build_interface(name, *rx, *tx, rx_rate, tx_rate));
+            let ipv4 = self.ip_cache.get(name).cloned().unwrap_or_default();
+            interfaces.push(build_interface(name, *rx, *tx, rx_rate, tx_rate, ipv4));
         }
 
         self.prev_bytes = current;
@@ -100,6 +110,7 @@ fn build_interface(
     tx_total: u64,
     rx_rate: u64,
     tx_rate: u64,
+    ipv4: Vec<String>,
 ) -> InterfaceMetrics {
     let base = Path::new("/sys/class/net").join(name);
     let mac = read_file(base.join("address")).unwrap_or_default();
@@ -118,7 +129,7 @@ fn build_interface(
         mac,
         state,
         mtu,
-        ipv4: read_ipv4(name),
+        ipv4,
         rx_bytes_per_sec: rx_rate,
         tx_bytes_per_sec: tx_rate,
         rx_total_bytes: rx_total,
@@ -161,23 +172,25 @@ fn read_proc_net_dev() -> HashMap<String, (u64, u64)> {
     map
 }
 
-fn read_ipv4(iface: &str) -> Vec<String> {
-    let output = Command::new("ip")
-        .args(["-4", "-o", "addr", "show", "dev", iface])
-        .output();
-
-    let Ok(output) = output else {
-        return Vec::new();
+fn read_all_ipv4() -> HashMap<String, Vec<String>> {
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    let Ok(output) = Command::new("ip")
+        .args(["-4", "-o", "addr", "show"])
+        .output()
+    else {
+        return map;
     };
 
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            line.split_whitespace()
-                .nth(3)
-                .map(|s| s.split('/').next().unwrap_or(s).to_string())
-        })
-        .collect()
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 4 {
+            let iface = parts[1].to_string();
+            let ip = parts[3].split('/').next().unwrap_or(parts[3]).to_string();
+            map.entry(iface).or_default().push(ip);
+        }
+    }
+
+    map
 }
 
 fn read_wireless_signal(iface: &str) -> Option<(String, i32)> {

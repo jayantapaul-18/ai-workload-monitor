@@ -11,6 +11,10 @@ impl GpuCollector {
     }
 
     pub fn collect(&self) -> GpuMetrics {
+        if let Some(metrics) = collect_nvidia_gpu() {
+            return metrics;
+        }
+
         let card = find_amdgpu_card();
 
         let Some(card_path) = card else {
@@ -125,4 +129,97 @@ fn read_trimmed(path: &Path) -> Option<String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+fn collect_nvidia_gpu() -> Option<GpuMetrics> {
+    if !has_nvidia_device() {
+        return None;
+    }
+
+    let output = std::process::Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=name,utilization.gpu,temperature.gpu,power.draw,clocks.current.graphics,memory.used,memory.total",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next()?;
+    parse_nvidia_smi_line(line)
+}
+
+fn has_nvidia_device() -> bool {
+    Path::new("/proc/driver/nvidia/version").exists()
+        || Path::new("/dev/nvidia0").exists()
+        || find_nvidia_drm_card().is_some()
+}
+
+fn find_nvidia_drm_card() -> Option<PathBuf> {
+    let drm = Path::new("/sys/class/drm");
+    let entries = fs::read_dir(drm).ok()?;
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("card") || name.contains('-') {
+            continue;
+        }
+
+        let device = entry.path().join("device");
+        let vendor = read_trimmed(&device.join("vendor")).unwrap_or_default();
+        if vendor == "0x10de" {
+            return Some(device);
+        }
+    }
+
+    None
+}
+
+pub fn parse_nvidia_smi_line(line: &str) -> Option<GpuMetrics> {
+    let parts: Vec<&str> = line.split(',').map(str::trim).collect();
+    if parts.len() < 7 {
+        return None;
+    }
+
+    let name = parts[0].to_string();
+    let usage_percent = parts[1].parse::<f32>().unwrap_or(0.0);
+    let temperature_c = parts[2].parse::<f32>().ok();
+    let power_watts = parts[3].parse::<f32>().ok();
+    let frequency_mhz = parts[4].parse::<f32>().ok();
+    let vram_used_bytes = parts[5].parse::<u64>().ok().map(|mb| mb * 1024 * 1024);
+    let vram_total_bytes = parts[6].parse::<u64>().ok().map(|mb| mb * 1024 * 1024);
+
+    Some(GpuMetrics {
+        available: true,
+        name,
+        usage_percent,
+        temperature_c,
+        power_watts,
+        frequency_mhz,
+        vram_used_bytes,
+        vram_total_bytes,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_nvidia_smi_csv() {
+        let line = "NVIDIA GeForce RTX 4090, 38, 64, 185.4, 2520, 8192, 24576";
+        let gpu = parse_nvidia_smi_line(line).expect("parses nvidia-smi line");
+        assert_eq!(gpu.name, "NVIDIA GeForce RTX 4090");
+        assert_eq!(gpu.usage_percent, 38.0);
+        assert_eq!(gpu.temperature_c, Some(64.0));
+        assert_eq!(gpu.power_watts, Some(185.4));
+        assert_eq!(gpu.frequency_mhz, Some(2520.0));
+        assert_eq!(gpu.vram_used_bytes, Some(8192 * 1024 * 1024));
+        assert_eq!(gpu.vram_total_bytes, Some(24576 * 1024 * 1024));
+        assert!(gpu.available);
+    }
 }
