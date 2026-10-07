@@ -19,6 +19,13 @@ function statusClass(status: string): string {
   return "ai-workload-card__status--idle";
 }
 
+const KNOWN_RUNTIMES = [
+  { id: "ollama", name: "Ollama", port: "11434" },
+  { id: "vllm", name: "vLLM", port: "8000" },
+  { id: "llama_cpp", name: "llama.cpp", port: "8080" },
+  { id: "comfyui", name: "ComfyUI", port: "8188" },
+];
+
 export function ActiveAiWorkloads({ aiRuntimes }: ActiveAiWorkloadsProps) {
   const { workloads, bottleneck, runtimes_online } = aiRuntimes;
   const hasRuntimes = runtimes_online.length > 0;
@@ -38,6 +45,26 @@ export function ActiveAiWorkloads({ aiRuntimes }: ActiveAiWorkloadsProps) {
         {hasWorkloads && (
           <span className="ai-intelligence__count">{workloads.length} model{workloads.length !== 1 ? "s" : ""}</span>
         )}
+      </div>
+
+      <div className="runtime-status-strip">
+        {KNOWN_RUNTIMES.map((rt) => {
+          const isOnline = runtimes_online.includes(rt.id);
+          const count = workloads.filter((w) => w.runtime === rt.id).length;
+          return (
+            <div
+              key={rt.id}
+              className={`runtime-status-pill ${isOnline ? "runtime-status-pill--online" : "runtime-status-pill--offline"}`}
+            >
+              <span className="runtime-status-pill__dot" />
+              <span className="runtime-status-pill__name">{rt.name}</span>
+              <span className="runtime-status-pill__port">:{rt.port}</span>
+              <span className="runtime-status-pill__state">
+                {isOnline ? (count > 0 ? `${count} active` : "Connected") : "Offline"}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
       {bottleneck && (

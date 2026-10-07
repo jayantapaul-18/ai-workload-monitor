@@ -227,7 +227,7 @@ export function SettingsPanel({
           <SettingSection title="AI Workloads" description="Runtime connectors and process detection">
             <SettingRow
               label="AI runtime intelligence"
-              description="Query Ollama and vLLM for loaded models, throughput, and bottlenecks"
+              description="Query Ollama, vLLM, llama.cpp, and ComfyUI for loaded models, throughput, and bottlenecks"
             >
               <Toggle
                 checked={settings.aiIntelligenceEnabled}
