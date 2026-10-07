@@ -8,6 +8,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "processes", label: "Processes", icon: "☰" },
   { id: "network", label: "Network", icon: "⇄" },
   { id: "hardware", label: "Hardware", icon: "⌂" },
+  { id: "architecture", label: "Architecture", icon: "⎇" },
 ];
 
 interface SidebarProps {
@@ -30,8 +31,8 @@ export function Sidebar({ active, onChange, aiCount, compact = false }: SidebarP
         />
         {!compact && (
           <div>
-            <div className="sidebar__title">PulseMonitor</div>
-            <div className="sidebar__subtitle">AI Workload</div>
+            <div className="sidebar__title">AI Workload</div>
+            <div className="sidebar__subtitle">Monitor</div>
           </div>
         )}
       </div>

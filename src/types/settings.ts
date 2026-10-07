@@ -20,6 +20,8 @@ export interface AppSettings {
   aiIntelligenceEnabled: boolean;
   ollamaUrl: string;
   vllmMetricsUrl: string;
+  llamaCppUrl: string;
+  comfyuiUrl: string;
   colorTheme: "dark" | "light";
   accentTheme: "green" | "blue" | "purple";
   compactSidebar: boolean;
@@ -64,6 +66,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiIntelligenceEnabled: true,
   ollamaUrl: "http://127.0.0.1:11434",
   vllmMetricsUrl: "http://127.0.0.1:8000/metrics",
+  llamaCppUrl: "http://127.0.0.1:8080",
+  comfyuiUrl: "http://127.0.0.1:8188",
   colorTheme: "dark",
   accentTheme: "green",
   compactSidebar: false,

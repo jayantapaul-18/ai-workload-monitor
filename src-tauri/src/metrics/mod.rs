@@ -27,6 +27,8 @@ pub struct CollectOptions {
     pub ai_intelligence_enabled: bool,
     pub ollama_url: String,
     pub vllm_metrics_url: String,
+    pub llama_cpp_url: String,
+    pub comfyui_url: String,
 }
 
 pub struct MetricsEngine {
@@ -83,6 +85,8 @@ impl MetricsEngine {
             options.ai_intelligence_enabled,
             &options.ollama_url,
             &options.vllm_metrics_url,
+            &options.llama_cpp_url,
+            &options.comfyui_url,
             &gpu,
             &cpu,
             &memory,

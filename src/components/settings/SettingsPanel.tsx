@@ -252,6 +252,24 @@ export function SettingsPanel({
                 disabled={!settings.aiIntelligenceEnabled}
               />
             </SettingRow>
+            <SettingRow label="llama.cpp URL" description="Base URL for llama-server (default port 8080)">
+              <input
+                className="setting-input"
+                type="text"
+                value={settings.llamaCppUrl}
+                onChange={(e) => onUpdate({ llamaCppUrl: e.target.value })}
+                disabled={!settings.aiIntelligenceEnabled}
+              />
+            </SettingRow>
+            <SettingRow label="ComfyUI URL" description="Base URL for ComfyUI API (default port 8188)">
+              <input
+                className="setting-input"
+                type="text"
+                value={settings.comfyuiUrl}
+                onChange={(e) => onUpdate({ comfyuiUrl: e.target.value })}
+                disabled={!settings.aiIntelligenceEnabled}
+              />
+            </SettingRow>
             <SettingRow label="Highlight AI processes" description="Mark AI-tagged rows in process list">
               <Toggle
                 checked={settings.highlightAiInProcesses}

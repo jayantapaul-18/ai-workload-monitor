@@ -1,6 +1,9 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use super::types::{
@@ -8,20 +11,83 @@ use super::types::{
 };
 
 const HTTP_TIMEOUT: Duration = Duration::from_millis(800);
+const SCRAPE_INTERVAL: Duration = Duration::from_millis(2000);
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct AiRuntimeConfig {
+    enabled: bool,
+    ollama_url: String,
+    vllm_metrics_url: String,
+    llama_cpp_url: String,
+    comfyui_url: String,
+}
+
+#[derive(Clone, Default)]
+struct ScrapedData {
+    ollama_online: bool,
+    ollama_models: Vec<OllamaModel>,
+    ollama_cli: HashMap<String, OllamaCliRow>,
+    vllm_online: bool,
+    vllm_workloads: Vec<AiWorkloadEntry>,
+    llama_cpp_online: bool,
+    llama_cpp_workloads: Vec<AiWorkloadEntry>,
+    comfyui_online: bool,
+    comfyui_workloads: Vec<AiWorkloadEntry>,
+}
+
+struct AiScraperShared {
+    config: Mutex<AiRuntimeConfig>,
+    trigger: (Mutex<bool>, Condvar),
+    scraped: Mutex<ScrapedData>,
+    stop: AtomicBool,
+    vllm_prev_tokens: Mutex<Option<(f64, Instant)>>,
+}
+
 pub struct AiRuntimeCollector {
-    vllm_prev_tokens: Option<(f64, Instant)>,
-    ollama_tps_smooth: std::collections::HashMap<String, f32>,
+    state: Arc<AiScraperShared>,
+    _worker: Option<JoinHandle<()>>,
+    ollama_tps_smooth: HashMap<String, f32>,
+}
+
+impl Default for AiRuntimeCollector {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AiRuntimeCollector {
+    pub fn new() -> Self {
+        let state = Arc::new(AiScraperShared {
+            config: Mutex::new(AiRuntimeConfig::default()),
+            trigger: (Mutex::new(false), Condvar::new()),
+            scraped: Mutex::new(ScrapedData::default()),
+            stop: AtomicBool::new(false),
+            vllm_prev_tokens: Mutex::new(None),
+        });
+
+        let worker_state = Arc::clone(&state);
+        let worker = thread::Builder::new()
+            .name("ai-runtime-scraper".into())
+            .spawn(move || {
+                run_scraper_loop(worker_state);
+            })
+            .ok();
+
+        Self {
+            state,
+            _worker: worker,
+            ollama_tps_smooth: HashMap::new(),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn collect(
         &mut self,
         enabled: bool,
         ollama_url: &str,
         vllm_metrics_url: &str,
+        llama_cpp_url: &str,
+        comfyui_url: &str,
         gpu: &GpuMetrics,
         cpu: &CpuMetrics,
         memory: &MemoryMetrics,
@@ -31,110 +97,65 @@ impl AiRuntimeCollector {
             return AiRuntimeMetrics::default();
         }
 
+        // Check if config changed; if so, notify background scraper
+        let mut config_changed = false;
+        if let Ok(mut cfg) = self.state.config.lock() {
+            if cfg.enabled != enabled
+                || cfg.ollama_url != ollama_url
+                || cfg.vllm_metrics_url != vllm_metrics_url
+                || cfg.llama_cpp_url != llama_cpp_url
+                || cfg.comfyui_url != comfyui_url
+            {
+                cfg.enabled = enabled;
+                cfg.ollama_url = ollama_url.to_string();
+                cfg.vllm_metrics_url = vllm_metrics_url.to_string();
+                cfg.llama_cpp_url = llama_cpp_url.to_string();
+                cfg.comfyui_url = comfyui_url.to_string();
+                config_changed = true;
+            }
+        }
+        if config_changed {
+            self.state.trigger.1.notify_one();
+        }
+
+        // Sub-microsecond read of latest scraped runtime data from decoupled background cache
+        let scraped = match self.state.scraped.lock() {
+            Ok(data) => data.clone(),
+            Err(_) => ScrapedData::default(),
+        };
+
         let mut workloads = Vec::new();
         let mut runtimes_online = Vec::new();
 
-        if let Some(ollama) =
-            collect_ollama(ollama_url, gpu, &mut self.ollama_tps_smooth, runner_cpu)
-        {
+        // 1. Ollama synthesis (correlating cached model list with live GPU & runner CPU)
+        if scraped.ollama_online {
             runtimes_online.push("ollama".into());
-            workloads.extend(ollama);
-        }
+            let gpu_inferencing = gpu.available && gpu.usage_percent > 25.0;
+            let runner_active = runner_cpu > 20.0;
 
-        if let Some((vllm_online, vllm_workloads)) =
-            collect_vllm(vllm_metrics_url, &mut self.vllm_prev_tokens)
-        {
-            if vllm_online {
-                runtimes_online.push("vllm".into());
-            }
-            workloads.extend(vllm_workloads);
-        }
+            let models = if scraped.ollama_models.is_empty() {
+                scraped
+                    .ollama_cli
+                    .keys()
+                    .map(|name| OllamaModel {
+                        name: name.clone(),
+                        size: 0,
+                        size_vram: 0,
+                        processor: scraped
+                            .ollama_cli
+                            .get(name)
+                            .map(|r| r.processor.clone())
+                            .unwrap_or_default(),
+                        context_length: scraped.ollama_cli.get(name).and_then(|r| r.context_length),
+                        details: None,
+                    })
+                    .collect()
+            } else {
+                scraped.ollama_models
+            };
 
-        let bottleneck = diagnose_bottleneck(gpu, cpu, memory, &workloads);
-
-        AiRuntimeMetrics {
-            workloads,
-            bottleneck,
-            runtimes_online,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaPsResponse {
-    #[serde(default)]
-    models: Vec<OllamaModel>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaModel {
-    name: String,
-    #[serde(default)]
-    size: u64,
-    #[serde(default)]
-    size_vram: u64,
-    #[serde(default)]
-    processor: String,
-    #[serde(default)]
-    context_length: Option<u32>,
-    #[serde(default)]
-    details: Option<OllamaModelDetails>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaModelDetails {
-    #[serde(default)]
-    parameter_size: String,
-    #[serde(default)]
-    quantization_level: String,
-}
-
-fn collect_ollama(
-    base_url: &str,
-    gpu: &GpuMetrics,
-    tps_smooth: &mut HashMap<String, f32>,
-    runner_cpu: f32,
-) -> Option<Vec<AiWorkloadEntry>> {
-    let url = format!("{}/api/ps", base_url.trim_end_matches('/'));
-    let response = ureq::get(&url).timeout(HTTP_TIMEOUT).call().ok()?;
-    let body: OllamaPsResponse = response
-        .into_string()
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())?;
-
-    let cli_rows = parse_ollama_ps_cli(base_url);
-
-    if body.models.is_empty() && cli_rows.is_empty() {
-        return Some(Vec::new());
-    }
-
-    let gpu_inferencing = gpu.available && gpu.usage_percent > 25.0;
-    let runner_active = runner_cpu > 20.0;
-
-    let models: Vec<OllamaModel> = if body.models.is_empty() {
-        cli_rows
-            .keys()
-            .map(|name| OllamaModel {
-                name: name.clone(),
-                size: 0,
-                size_vram: 0,
-                processor: cli_rows
-                    .get(name)
-                    .map(|r| r.processor.clone())
-                    .unwrap_or_default(),
-                context_length: cli_rows.get(name).and_then(|r| r.context_length),
-                details: None,
-            })
-            .collect()
-    } else {
-        body.models
-    };
-
-    Some(
-        models
-            .into_iter()
-            .map(|model| {
-                let cli = cli_rows.get(&model.name);
+            for model in models {
+                let cli = scraped.ollama_cli.get(&model.name);
                 let processor_field = if model.processor.is_empty() {
                     cli.map(|r| r.processor.as_str()).unwrap_or("")
                 } else {
@@ -165,10 +186,10 @@ fn collect_ollama(
                     parameter_size.as_deref(),
                     quantization.as_deref(),
                     &accelerator,
-                    tps_smooth,
+                    &mut self.ollama_tps_smooth,
                 );
 
-                AiWorkloadEntry {
+                workloads.push(AiWorkloadEntry {
                     runtime: "ollama".into(),
                     model: model.name,
                     status: if inferencing {
@@ -187,15 +208,185 @@ fn collect_ollama(
                         .context_length
                         .or_else(|| cli.and_then(|r| r.context_length)),
                     requests_running: if inferencing { Some(1) } else { None },
+                });
+            }
+        }
+
+        // 2. vLLM synthesis
+        if scraped.vllm_online {
+            runtimes_online.push("vllm".into());
+            workloads.extend(scraped.vllm_workloads);
+        }
+
+        // 3. llama.cpp synthesis
+        if scraped.llama_cpp_online {
+            runtimes_online.push("llama_cpp".into());
+            for mut entry in scraped.llama_cpp_workloads {
+                // If GPU is active during llama.cpp processing, refine accelerator label
+                if gpu.available && entry.status == "running" && gpu.usage_percent > 15.0 {
+                    entry.accelerator = "GPU (active offload)".into();
                 }
-            })
-            .collect(),
-    )
+                workloads.push(entry);
+            }
+        }
+
+        // 4. ComfyUI synthesis
+        if scraped.comfyui_online {
+            runtimes_online.push("comfyui".into());
+            for mut entry in scraped.comfyui_workloads {
+                if gpu.available && entry.status == "running" && gpu.usage_percent > 15.0 {
+                    entry.accelerator = if !gpu.name.is_empty() {
+                        gpu.name.clone()
+                    } else {
+                        "GPU (generating)".into()
+                    };
+                }
+                workloads.push(entry);
+            }
+        }
+
+        let bottleneck = diagnose_bottleneck(gpu, cpu, memory, &workloads);
+
+        AiRuntimeMetrics {
+            workloads,
+            bottleneck,
+            runtimes_online,
+        }
+    }
 }
 
+impl Drop for AiRuntimeCollector {
+    fn drop(&mut self) {
+        self.state.stop.store(true, Ordering::Relaxed);
+        self.state.trigger.1.notify_all();
+    }
+}
+
+fn run_scraper_loop(state: Arc<AiScraperShared>) {
+    loop {
+        if state.stop.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let config = match state.config.lock() {
+            Ok(cfg) => cfg.clone(),
+            Err(_) => break,
+        };
+
+        if config.enabled {
+            let scraped = scrape_all(&config, &state.vllm_prev_tokens);
+            if let Ok(mut cache) = state.scraped.lock() {
+                *cache = scraped;
+            }
+        } else if let Ok(mut cache) = state.scraped.lock() {
+            *cache = ScrapedData::default();
+        }
+
+        let (lock, cvar) = &state.trigger;
+        if let Ok(guard) = lock.lock() {
+            let _ = cvar.wait_timeout(guard, SCRAPE_INTERVAL);
+        } else {
+            thread::sleep(Duration::from_millis(500));
+        }
+    }
+}
+
+fn scrape_all(
+    config: &AiRuntimeConfig,
+    vllm_prev_tokens: &Mutex<Option<(f64, Instant)>>,
+) -> ScrapedData {
+    let mut data = ScrapedData::default();
+
+    // 1. Ollama
+    if !config.ollama_url.is_empty() {
+        if let Some((models, cli_rows)) = scrape_ollama(&config.ollama_url) {
+            data.ollama_online = true;
+            data.ollama_models = models;
+            data.ollama_cli = cli_rows;
+        }
+    }
+
+    // 2. vLLM
+    if !config.vllm_metrics_url.is_empty() {
+        let prev = vllm_prev_tokens.lock().ok();
+        if let Some(mut prev_guard) = prev {
+            if let Some((online, workloads)) =
+                scrape_vllm(&config.vllm_metrics_url, &mut prev_guard)
+            {
+                data.vllm_online = online;
+                data.vllm_workloads = workloads;
+            }
+        }
+    }
+
+    // 3. llama.cpp (llama-server)
+    if !config.llama_cpp_url.is_empty() {
+        if let Some((online, workloads)) = scrape_llama_cpp(&config.llama_cpp_url) {
+            data.llama_cpp_online = online;
+            data.llama_cpp_workloads = workloads;
+        }
+    }
+
+    // 4. ComfyUI
+    if !config.comfyui_url.is_empty() {
+        if let Some((online, workloads)) = scrape_comfyui(&config.comfyui_url) {
+            data.comfyui_online = online;
+            data.comfyui_workloads = workloads;
+        }
+    }
+
+    data
+}
+
+// -----------------------------------------------------------------------------
+// Ollama Scraping & Parsing
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+struct OllamaPsResponse {
+    #[serde(default)]
+    models: Vec<OllamaModel>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OllamaModel {
+    name: String,
+    #[serde(default)]
+    size: u64,
+    #[serde(default)]
+    size_vram: u64,
+    #[serde(default)]
+    processor: String,
+    #[serde(default)]
+    context_length: Option<u32>,
+    #[serde(default)]
+    details: Option<OllamaModelDetails>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OllamaModelDetails {
+    #[serde(default)]
+    parameter_size: String,
+    #[serde(default)]
+    quantization_level: String,
+}
+
+#[derive(Clone)]
 struct OllamaCliRow {
     processor: String,
     context_length: Option<u32>,
+}
+
+fn scrape_ollama(base_url: &str) -> Option<(Vec<OllamaModel>, HashMap<String, OllamaCliRow>)> {
+    let url = format!("{}/api/ps", base_url.trim_end_matches('/'));
+    let response = ureq::get(&url).timeout(HTTP_TIMEOUT).call().ok()?;
+    let body: OllamaPsResponse = response
+        .into_string()
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())?;
+
+    let cli_rows = parse_ollama_ps_cli(base_url);
+    Some((body.models, cli_rows))
 }
 
 fn parse_ollama_ps_cli(base_url: &str) -> HashMap<String, OllamaCliRow> {
@@ -350,12 +541,16 @@ fn resolve_ollama_memory(
     (None, false)
 }
 
+// -----------------------------------------------------------------------------
+// vLLM Prometheus Scraping & Parsing
+// -----------------------------------------------------------------------------
+
 struct VllmScrape {
     online: bool,
     workloads: Vec<AiWorkloadEntry>,
 }
 
-fn collect_vllm(
+fn scrape_vllm(
     metrics_url: &str,
     prev_tokens: &mut Option<(f64, Instant)>,
 ) -> Option<(bool, Vec<AiWorkloadEntry>)> {
@@ -366,8 +561,7 @@ fn collect_vllm(
 }
 
 fn parse_vllm_prometheus(body: &str, prev_tokens: &mut Option<(f64, Instant)>) -> VllmScrape {
-    let mut generation_tps: std::collections::HashMap<String, f32> =
-        std::collections::HashMap::new();
+    let mut generation_tps: HashMap<String, f32> = HashMap::new();
     let mut gpu_cache_usage: Option<f32> = None;
     let mut requests_running = 0u32;
     let mut total_generation_tokens = 0f64;
@@ -484,6 +678,354 @@ fn parse_scalar_metric(line: &str) -> Option<f64> {
     line.rsplit(' ').next()?.parse().ok()
 }
 
+// -----------------------------------------------------------------------------
+// llama.cpp (llama-server) Scraping & Parsing
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+struct LlamaSlot {
+    #[serde(default)]
+    id: i64,
+    #[serde(default)]
+    id_task: Option<i64>,
+    #[serde(default)]
+    n_ctx: Option<u32>,
+    #[serde(default)]
+    is_processing: bool,
+    #[serde(default)]
+    state: Option<i32>,
+    #[serde(default)]
+    model: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LlamaProps {
+    #[serde(default)]
+    default_generation_settings: Option<LlamaGenSettings>,
+    #[serde(default)]
+    model_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LlamaGenSettings {
+    #[serde(default)]
+    n_ctx: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+struct LlamaHealth {
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    slots_processing: Option<u32>,
+}
+
+fn scrape_llama_cpp(base_url: &str) -> Option<(bool, Vec<AiWorkloadEntry>)> {
+    let base = base_url.trim_end_matches('/');
+
+    // 1. Try querying /slots
+    let slots_url = format!("{}/slots", base);
+    let slots_resp = ureq::get(&slots_url).timeout(HTTP_TIMEOUT).call().ok();
+
+    let mut slots = Vec::new();
+    if let Some(resp) = slots_resp {
+        if let Ok(text) = resp.into_string() {
+            slots = parse_llama_cpp_slots(&text);
+        }
+    }
+
+    // 2. Query /props for model metadata if needed
+    let props_url = format!("{}/props", base);
+    let props: Option<LlamaProps> = ureq::get(&props_url)
+        .timeout(HTTP_TIMEOUT)
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+        .and_then(|t| serde_json::from_str(&t).ok());
+
+    // 3. Fallback: query /health if both slots and props were empty
+    let health: Option<LlamaHealth> = if slots.is_empty() && props.is_none() {
+        let health_url = format!("{}/health", base);
+        ureq::get(&health_url)
+            .timeout(HTTP_TIMEOUT)
+            .call()
+            .ok()
+            .and_then(|r| r.into_string().ok())
+            .and_then(|t| serde_json::from_str(&t).ok())
+    } else {
+        None
+    };
+
+    if slots.is_empty() && props.is_none() && health.is_none() {
+        return None;
+    }
+
+    let workloads = build_llama_workloads(&slots, props.as_ref(), health.as_ref());
+    Some((true, workloads))
+}
+
+fn parse_llama_cpp_slots(text: &str) -> Vec<LlamaSlot> {
+    if let Ok(slots) = serde_json::from_str::<Vec<LlamaSlot>>(text) {
+        slots
+    } else if let Ok(val) = serde_json::from_str::<serde_json::Value>(text) {
+        val.get("slots")
+            .and_then(|s| serde_json::from_value::<Vec<LlamaSlot>>(s.clone()).ok())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+fn build_llama_workloads(
+    slots: &[LlamaSlot],
+    props: Option<&LlamaProps>,
+    health: Option<&LlamaHealth>,
+) -> Vec<AiWorkloadEntry> {
+    let raw_model = slots
+        .iter()
+        .find_map(|s| s.model.clone())
+        .filter(|m| !m.is_empty())
+        .or_else(|| props.and_then(|p| p.model_path.clone()))
+        .unwrap_or_else(|| "llama-server".to_string());
+
+    let (model_display, param_size, quant) = extract_model_details(&raw_model);
+
+    let active_slots = slots
+        .iter()
+        .filter(|s| s.is_processing || s.state == Some(1))
+        .count() as u32;
+
+    let requests_running = if !slots.is_empty() {
+        Some(active_slots)
+    } else {
+        health.and_then(|h| h.slots_processing)
+    };
+
+    let is_running = requests_running.map(|r| r > 0).unwrap_or(false);
+
+    let context_length = slots
+        .iter()
+        .find_map(|s| s.n_ctx)
+        .or_else(|| props.and_then(|p| p.default_generation_settings.as_ref()?.n_ctx));
+
+    vec![AiWorkloadEntry {
+        runtime: "llama_cpp".into(),
+        model: model_display,
+        status: if is_running {
+            "running".into()
+        } else {
+            "loaded".into()
+        },
+        accelerator: "GPU (offload)".into(),
+        vram_bytes: None,
+        memory_on_gpu: true,
+        tokens_per_sec: None,
+        throughput_kind: if is_running {
+            "active".into()
+        } else {
+            "none".into()
+        },
+        parameter_size: param_size,
+        quantization: quant,
+        context_length,
+        requests_running,
+    }]
+}
+
+fn is_param_size(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    if (lower.ends_with('b') || lower.ends_with('m')) && lower.len() >= 2 {
+        let num = &lower[..lower.len() - 1];
+        if !num.is_empty()
+            && num.chars().all(|c| c.is_ascii_digit() || c == '.')
+            && num.chars().any(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn extract_model_details(path_or_name: &str) -> (String, Option<String>, Option<String>) {
+    let filename = path_or_name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(path_or_name)
+        .to_string();
+
+    let mut param_size = None;
+    for part in filename.split(['-', '_', ' ']) {
+        let token = part.strip_suffix(".gguf").unwrap_or(part);
+        if is_param_size(token) {
+            param_size = Some(token.to_uppercase());
+            break;
+        }
+        for sub in token.split('.') {
+            if is_param_size(sub) {
+                param_size = Some(sub.to_uppercase());
+                break;
+            }
+        }
+        if param_size.is_some() {
+            break;
+        }
+    }
+
+    let quants = [
+        "Q4_K_M", "Q4_K_S", "Q4_0", "Q4_1", "Q5_K_M", "Q5_K_S", "Q5_0", "Q5_1", "Q6_K", "Q8_0",
+        "Q8_1", "Q2_K", "Q3_K_M", "Q3_K_S", "Q3_K_L", "IQ4_NL", "IQ4_XS", "IQ3_M", "IQ3_S",
+        "IQ2_XXS", "IQ2_XS", "BF16", "FP16", "F16", "FP32", "F32",
+    ];
+
+    let mut quant = None;
+    let upper = filename.to_uppercase();
+    for q in quants {
+        if upper.contains(q) {
+            quant = Some(q.to_string());
+            break;
+        }
+    }
+
+    (filename, param_size, quant)
+}
+
+// -----------------------------------------------------------------------------
+// ComfyUI Scraping & Parsing
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[allow(dead_code)]
+struct ComfyQueueResponse {
+    #[serde(default)]
+    queue_running: Vec<serde_json::Value>,
+    #[serde(default)]
+    queue_pending: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct ComfySystemStats {
+    #[serde(default)]
+    devices: Vec<ComfyDevice>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct ComfyDevice {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    r#type: String,
+    #[serde(default)]
+    vram_total: Option<u64>,
+    #[serde(default)]
+    vram_free: Option<u64>,
+    #[serde(default)]
+    torch_vram_total: Option<u64>,
+}
+
+fn scrape_comfyui(base_url: &str) -> Option<(bool, Vec<AiWorkloadEntry>)> {
+    let base = base_url.trim_end_matches('/');
+
+    let queue_url = format!("{}/queue", base);
+    let queue_resp = ureq::get(&queue_url).timeout(HTTP_TIMEOUT).call().ok()?;
+    let queue_body = queue_resp.into_string().ok()?;
+    let queue: ComfyQueueResponse = serde_json::from_str(&queue_body).ok()?;
+
+    let stats_url = format!("{}/system_stats", base);
+    let stats: Option<ComfySystemStats> = ureq::get(&stats_url)
+        .timeout(HTTP_TIMEOUT)
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+        .and_then(|t| serde_json::from_str(&t).ok());
+
+    let entry = parse_comfyui_data(&queue, stats.as_ref());
+    Some((true, vec![entry]))
+}
+
+fn parse_comfyui_data(
+    queue: &ComfyQueueResponse,
+    stats: Option<&ComfySystemStats>,
+) -> AiWorkloadEntry {
+    let running_count = queue.queue_running.len() as u32;
+    let is_running = running_count > 0;
+
+    let model_name = extract_comfyui_model(&queue.queue_running)
+        .unwrap_or_else(|| "ComfyUI Workflow".to_string());
+
+    let (accelerator, vram_bytes, is_gpu) = if let Some(dev) = stats.and_then(|s| s.devices.first())
+    {
+        let is_cuda = dev.r#type == "cuda"
+            || dev.name.to_lowercase().contains("nvidia")
+            || dev.name.to_lowercase().contains("rtx")
+            || dev.name.to_lowercase().contains("geforce");
+        let is_mps = dev.r#type == "mps" || dev.name.to_lowercase().contains("apple");
+        let name = if !dev.name.is_empty() {
+            dev.name.clone()
+        } else if is_cuda {
+            "GPU (CUDA)".into()
+        } else {
+            "GPU".into()
+        };
+        let vram = dev
+            .torch_vram_total
+            .or_else(|| match (dev.vram_total, dev.vram_free) {
+                (Some(tot), Some(free)) if tot >= free => Some(tot - free),
+                _ => None,
+            });
+        (name, vram, is_cuda || is_mps)
+    } else {
+        ("GPU".into(), None, true)
+    };
+
+    AiWorkloadEntry {
+        runtime: "comfyui".into(),
+        model: model_name,
+        status: if is_running {
+            "running".into()
+        } else {
+            "idle".into()
+        },
+        accelerator,
+        vram_bytes,
+        memory_on_gpu: is_gpu,
+        tokens_per_sec: None,
+        throughput_kind: if is_running {
+            "active".into()
+        } else {
+            "none".into()
+        },
+        parameter_size: None,
+        quantization: None,
+        context_length: None,
+        requests_running: Some(running_count),
+    }
+}
+
+fn extract_comfyui_model(queue_running: &[serde_json::Value]) -> Option<String> {
+    for item in queue_running {
+        if let Some(prompt_obj) = item.get(2).and_then(|v| v.as_object()) {
+            for (_node_id, node_val) in prompt_obj {
+                if let Some(inputs) = node_val.get("inputs").and_then(|v| v.as_object()) {
+                    for key in ["ckpt_name", "unet_name", "model_name", "checkpoint"] {
+                        if let Some(name) = inputs.get(key).and_then(|v| v.as_str()) {
+                            if !name.is_empty() {
+                                return Some(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// -----------------------------------------------------------------------------
+// Bottleneck Diagnosis
+// -----------------------------------------------------------------------------
+
 fn diagnose_bottleneck(
     gpu: &GpuMetrics,
     cpu: &CpuMetrics,
@@ -554,6 +1096,10 @@ fn diagnose_bottleneck(
 
     None
 }
+
+// -----------------------------------------------------------------------------
+// Unit Tests
+// -----------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -640,6 +1186,95 @@ vllm:gpu_cache_usage_perc 0.4
     #[test]
     fn rejects_unlabeled_metric_lines() {
         assert!(parse_labeled_metric("vllm:avg_generation_throughput_toks_per_s 1.0").is_none());
+    }
+
+    #[test]
+    fn parses_llama_cpp_slots_json() {
+        let json = r#"[
+            {
+                "id": 0,
+                "n_ctx": 4096,
+                "is_processing": true,
+                "state": 1,
+                "model": "qwen2.5-coder-7b-instruct-q4_k_m.gguf"
+            },
+            {
+                "id": 1,
+                "n_ctx": 4096,
+                "is_processing": false,
+                "state": 0,
+                "model": "qwen2.5-coder-7b-instruct-q4_k_m.gguf"
+            }
+        ]"#;
+        let slots = parse_llama_cpp_slots(json);
+        assert_eq!(slots.len(), 2);
+        assert!(slots[0].is_processing);
+        assert_eq!(slots[0].n_ctx, Some(4096));
+
+        let workloads = build_llama_workloads(&slots, None, None);
+        assert_eq!(workloads.len(), 1);
+        let entry = &workloads[0];
+        assert_eq!(entry.runtime, "llama_cpp");
+        assert_eq!(entry.model, "qwen2.5-coder-7b-instruct-q4_k_m.gguf");
+        assert_eq!(entry.parameter_size, Some("7B".into()));
+        assert_eq!(entry.quantization, Some("Q4_K_M".into()));
+        assert_eq!(entry.status, "running");
+        assert_eq!(entry.requests_running, Some(1));
+        assert_eq!(entry.context_length, Some(4096));
+    }
+
+    #[test]
+    fn extracts_llama_model_metadata() {
+        let (name, param, quant) =
+            extract_model_details("/models/Meta-Llama-3.1-70B-Instruct-Q8_0.gguf");
+        assert_eq!(name, "Meta-Llama-3.1-70B-Instruct-Q8_0.gguf");
+        assert_eq!(param, Some("70B".into()));
+        assert_eq!(quant, Some("Q8_0".into()));
+
+        let (name2, param2, quant2) = extract_model_details("deepseek-r1-1.5b-q4_k_m.gguf");
+        assert_eq!(name2, "deepseek-r1-1.5b-q4_k_m.gguf");
+        assert_eq!(param2, Some("1.5B".into()));
+        assert_eq!(quant2, Some("Q4_K_M".into()));
+    }
+
+    #[test]
+    fn parses_comfyui_queue_and_stats() {
+        let queue_json = r#"{
+            "queue_running": [
+                [
+                    0,
+                    "prompt-1",
+                    {
+                        "3": {
+                            "class_type": "CheckpointLoaderSimple",
+                            "inputs": { "ckpt_name": "v1-5-pruned-emaonly.safetensors" }
+                        }
+                    }
+                ]
+            ],
+            "queue_pending": []
+        }"#;
+        let queue: ComfyQueueResponse = serde_json::from_str(queue_json).unwrap();
+        let stats_json = r#"{
+            "devices": [
+                {
+                    "name": "NVIDIA GeForce RTX 4090",
+                    "type": "cuda",
+                    "vram_total": 25757220864,
+                    "vram_free": 15000000000,
+                    "torch_vram_total": 10757220864
+                }
+            ]
+        }"#;
+        let stats: ComfySystemStats = serde_json::from_str(stats_json).unwrap();
+
+        let entry = parse_comfyui_data(&queue, Some(&stats));
+        assert_eq!(entry.runtime, "comfyui");
+        assert_eq!(entry.model, "v1-5-pruned-emaonly.safetensors");
+        assert_eq!(entry.status, "running");
+        assert_eq!(entry.requests_running, Some(1));
+        assert_eq!(entry.accelerator, "NVIDIA GeForce RTX 4090");
+        assert_eq!(entry.vram_bytes, Some(10757220864));
     }
 
     #[test]

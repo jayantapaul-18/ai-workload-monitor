@@ -126,6 +126,8 @@ fn collect_options(settings: &AppSettings) -> CollectOptions {
         ai_intelligence_enabled: settings.ai_intelligence_enabled,
         ollama_url: settings.ollama_url.clone(),
         vllm_metrics_url: settings.vllm_metrics_url.clone(),
+        llama_cpp_url: settings.llama_cpp_url.clone(),
+        comfyui_url: settings.comfyui_url.clone(),
     }
 }
 

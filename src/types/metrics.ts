@@ -149,6 +149,7 @@ export type TabId =
   | "processes"
   | "network"
   | "hardware"
+  | "architecture"
   | "settings";
 
 export const EMPTY_METRICS: MetricsSnapshot = {

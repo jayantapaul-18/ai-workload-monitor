@@ -12,6 +12,7 @@ import { ProcessPanel } from "./components/processes/ProcessPanel";
 import { NetworkPanel } from "./components/network/NetworkPanel";
 import { useHardware } from "./hooks/useHardware";
 import { HardwarePanel } from "./components/hardware/HardwarePanel";
+import { ArchitecturePanel } from "./components/architecture/ArchitecturePanel";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { AlertToasts } from "./components/shared/AlertToasts";
 import "./App.css";
@@ -77,6 +78,7 @@ function App() {
               settingsPath={settingsPath}
             />
           )}
+          {tab === "architecture" && <ArchitecturePanel metrics={data} />}
           {tab === "settings" && (
             <SettingsPanel
               settings={settings}

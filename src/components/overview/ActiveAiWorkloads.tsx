@@ -8,6 +8,8 @@ interface ActiveAiWorkloadsProps {
 function runtimeLabel(runtime: string): string {
   if (runtime === "ollama") return "Ollama";
   if (runtime === "vllm") return "vLLM";
+  if (runtime === "llama_cpp") return "llama.cpp";
+  if (runtime === "comfyui") return "ComfyUI";
   return runtime;
 }
 
@@ -30,7 +32,7 @@ export function ActiveAiWorkloads({ aiRuntimes }: ActiveAiWorkloadsProps) {
           <p>
             {hasRuntimes
               ? `Connected: ${runtimes_online.map(runtimeLabel).join(" · ")}`
-              : "Connect Ollama or vLLM to see model-level metrics"}
+              : "Connect Ollama, vLLM, llama.cpp, or ComfyUI to see model-level metrics"}
           </p>
         </div>
         {hasWorkloads && (
@@ -102,7 +104,7 @@ export function ActiveAiWorkloads({ aiRuntimes }: ActiveAiWorkloadsProps) {
         <div className="ai-intelligence__empty">
           <p>No loaded models detected.</p>
           <p className="ai-intelligence__empty-hint">
-            Start Ollama (<code>ollama serve</code>) or vLLM, then load a model to see live workload cards here.
+            Start Ollama (<code>ollama serve</code>), vLLM, llama-server, or ComfyUI, then load a model to see live workload cards here.
           </p>
         </div>
       )}

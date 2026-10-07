@@ -38,6 +38,10 @@ pub struct AppSettings {
     pub ollama_url: String,
     #[serde(default = "default_vllm_metrics_url")]
     pub vllm_metrics_url: String,
+    #[serde(default = "default_llama_cpp_url")]
+    pub llama_cpp_url: String,
+    #[serde(default = "default_comfyui_url")]
+    pub comfyui_url: String,
 
     // Appearance
     #[serde(default = "default_color_theme")]
@@ -82,6 +86,8 @@ impl Default for AppSettings {
             ai_intelligence_enabled: default_ai_intelligence_enabled(),
             ollama_url: default_ollama_url(),
             vllm_metrics_url: default_vllm_metrics_url(),
+            llama_cpp_url: default_llama_cpp_url(),
+            comfyui_url: default_comfyui_url(),
             color_theme: default_color_theme(),
             accent_theme: "green".into(),
             compact_sidebar: false,
@@ -108,6 +114,14 @@ fn default_ollama_url() -> String {
 
 fn default_vllm_metrics_url() -> String {
     "http://127.0.0.1:8000/metrics".into()
+}
+
+fn default_llama_cpp_url() -> String {
+    "http://127.0.0.1:8080".into()
+}
+
+fn default_comfyui_url() -> String {
+    "http://127.0.0.1:8188".into()
 }
 
 pub fn default_ai_keywords() -> Vec<String> {
